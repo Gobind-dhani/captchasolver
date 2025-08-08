@@ -58,16 +58,16 @@ public class LoginController {
             memberCode.sendKeys("08756");
 
             String finalCaptcha = null;
-
             boolean otpScreenReached = false;
             int retryCount = 0;
             int maxRetries = 100;
 
+            // Phase 1: Login with captcha retries
             while (!otpScreenReached && retryCount < maxRetries) {
                 retryCount++;
                 System.out.println("Attempt " + retryCount + " to solve captcha...");
 
-                // Re-fill fields if cleared after refresh
+                // Refill fields if cleared
                 WebElement uField = wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("username")));
                 if (uField.getAttribute("value").isEmpty()) {
                     uField.clear();
@@ -100,7 +100,7 @@ public class LoginController {
                 WebElement loginButton = wait.until(ExpectedConditions.elementToBeClickable(By.id("btnLogin")));
                 loginButton.click();
 
-                // Handle OTP sent popup before proceeding
+                // Handle OTP popup if appears
                 try {
                     WebElement okButton = wait.until(ExpectedConditions.elementToBeClickable(
                             By.cssSelector("button.btn.red-button")
@@ -113,61 +113,8 @@ public class LoginController {
 
                 try {
                     // Wait for OTP fields - success condition
-                    List<WebElement> otpFields = wait.until(
-                            ExpectedConditions.numberOfElementsToBeMoreThan(By.cssSelector("input.otp_input"), 5)
-                    );
-                    otpScreenReached = true;
-
-                    // Fetch OTP from email
-                    Thread.sleep(5000);
-                    String otp = fetchLatestOtpFromEmail(
-                            "imap.gmail.com",
-                            "gobind.barick@indiabulls.com",
-                            "fkolsfimzanoexce",
-                            "CONNECT2NSCCL@nse.co.in"
-                    );
-
-                    if (otp == null || otp.length() != 6) {
-                        throw new RuntimeException("Failed to fetch or parse valid 6-digit OTP from email.");
-                    }
-
-                    System.out.println("Fetched OTP: " + otp);
-
-                    // Fill OTP
-                    for (int i = 0; i < 6; i++) {
-                        otpFields.get(i).sendKeys(String.valueOf(otp.charAt(i)));
-                    }
-
-                    // Click the Proceed button to land on the home page
-                    WebElement proceedButton = wait.until(ExpectedConditions.elementToBeClickable(
-                            By.cssSelector("button.btn.btn-danger.button-submit-otp")
-                    ));
-                    proceedButton.click();
-                    System.out.println("Clicked Proceed button after OTP entry.");
-
-                    // Wait until the link is clickable
-                    WebElement collateralLink = wait.until(ExpectedConditions.elementToBeClickable(
-                            By.xpath("//a[.//span[text()='COLLATERAL MANAGEMENT']]")
-                    ));
-
-                    // Click the link
-                    collateralLink.click();
-
-                    // Switch to new tab
-                    for (String handle : driver.getWindowHandles()) {
-                        driver.switchTo().window(handle);
-                    }
-                    // select Allocation dropdown
-                    WebElement allocationDropdown = wait.until(ExpectedConditions
-                            .elementToBeClickable(By.xpath("//a[@id='navbarDropdown' and contains(text(), 'ALLOCATION')]")));
-                    allocationDropdown.click();
-
-                    // select collateral allocation information option
-                    WebElement collateralOption = wait.until(ExpectedConditions
-                            .elementToBeClickable(By.xpath("//a[contains(text(), 'COLLATERAL ALLOCATION INFORMATION')]")));
-                    collateralOption.click();
-
-
+                    wait.until(ExpectedConditions.numberOfElementsToBeMoreThan(By.cssSelector("input.otp_input"), 5));
+                    otpScreenReached = true; // ✅ mark success and exit loop
                 } catch (TimeoutException e) {
                     System.out.println("Captcha likely incorrect. Refreshing captcha...");
                     try {
@@ -186,14 +133,60 @@ public class LoginController {
                 throw new RuntimeException("Failed to login after " + maxRetries + " captcha attempts.");
             }
 
+            // Phase 2: OTP handling
+            List<WebElement> otpFields = wait.until(
+                    ExpectedConditions.numberOfElementsToBeMoreThan(By.cssSelector("input.otp_input"), 5)
+            );
+
+            Thread.sleep(5000);
+            String otp = fetchLatestOtpFromEmail(
+                    "imap.gmail.com",
+                    "gobind.barick@indiabulls.com",
+                    "fkolsfimzanoexce",
+                    "CONNECT2NSCCL@nse.co.in"
+            );
+
+            if (otp == null || otp.length() != 6) {
+                throw new RuntimeException("Failed to fetch or parse valid 6-digit OTP from email.");
+            }
+
+            System.out.println("Fetched OTP: " + otp);
+
+            for (int i = 0; i < 6; i++) {
+                otpFields.get(i).sendKeys(String.valueOf(otp.charAt(i)));
+            }
+
+            WebElement proceedButton = wait.until(ExpectedConditions.elementToBeClickable(
+                    By.cssSelector("button.btn.btn-danger.button-submit-otp")
+            ));
+            proceedButton.click();
+            System.out.println("Clicked Proceed button after OTP entry.");
+
+            // Phase 3: Post-login navigation
+            WebElement collateralLink = wait.until(ExpectedConditions.elementToBeClickable(
+                    By.xpath("//a[.//span[text()='COLLATERAL MANAGEMENT']]")
+            ));
+            collateralLink.click();
+
+            // Switch to new tab
+            for (String handle : driver.getWindowHandles()) {
+                driver.switchTo().window(handle);
+            }
+
+            WebElement allocationDropdown = wait.until(ExpectedConditions
+                    .elementToBeClickable(By.xpath("//a[@id='navbarDropdown' and contains(text(), 'ALLOCATION')]")));
+            allocationDropdown.click();
+
+            WebElement collateralOption = wait.until(ExpectedConditions
+                    .elementToBeClickable(By.xpath("//a[contains(text(), 'COLLATERAL ALLOCATION INFORMATION')]")));
+            collateralOption.click();
+
             return ResponseEntity.ok("Login flow completed. Captcha: " + finalCaptcha);
 
         } catch (Exception e) {
             e.printStackTrace();
-            return ResponseEntity.status(500).body("Selenium error: " + e.getMessage());}
-//        } finally {
-//            driver.quit();
-//        }
+            return ResponseEntity.status(500).body("Selenium error: " + e.getMessage());
+        }
     }
 
     private String solveCaptcha(WebElement captchaImg) throws Exception {
