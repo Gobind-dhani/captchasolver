@@ -100,6 +100,17 @@ public class LoginController {
                 WebElement loginButton = wait.until(ExpectedConditions.elementToBeClickable(By.id("btnLogin")));
                 loginButton.click();
 
+                // Handle OTP sent popup before proceeding
+                try {
+                    WebElement okButton = wait.until(ExpectedConditions.elementToBeClickable(
+                            By.cssSelector("button.btn.red-button")
+                    ));
+                    okButton.click();
+                    System.out.println("OTP popup dismissed.");
+                } catch (TimeoutException te) {
+                    System.out.println("No OTP popup appeared, continuing...");
+                }
+
                 try {
                     // Wait for OTP fields - success condition
                     List<WebElement> otpFields = wait.until(
@@ -127,6 +138,36 @@ public class LoginController {
                         otpFields.get(i).sendKeys(String.valueOf(otp.charAt(i)));
                     }
 
+                    // Click the Proceed button to land on the home page
+                    WebElement proceedButton = wait.until(ExpectedConditions.elementToBeClickable(
+                            By.cssSelector("button.btn.btn-danger.button-submit-otp")
+                    ));
+                    proceedButton.click();
+                    System.out.println("Clicked Proceed button after OTP entry.");
+
+                    // Wait until the link is clickable
+                    WebElement collateralLink = wait.until(ExpectedConditions.elementToBeClickable(
+                            By.xpath("//a[.//span[text()='COLLATERAL MANAGEMENT']]")
+                    ));
+
+                    // Click the link
+                    collateralLink.click();
+
+                    // Switch to new tab
+                    for (String handle : driver.getWindowHandles()) {
+                        driver.switchTo().window(handle);
+                    }
+                    // select Allocation dropdown
+                    WebElement allocationDropdown = wait.until(ExpectedConditions
+                            .elementToBeClickable(By.xpath("//a[@id='navbarDropdown' and contains(text(), 'ALLOCATION')]")));
+                    allocationDropdown.click();
+
+                    // select collateral allocation information option
+                    WebElement collateralOption = wait.until(ExpectedConditions
+                            .elementToBeClickable(By.xpath("//a[contains(text(), 'COLLATERAL ALLOCATION INFORMATION')]")));
+                    collateralOption.click();
+
+
                 } catch (TimeoutException e) {
                     System.out.println("Captcha likely incorrect. Refreshing captcha...");
                     try {
@@ -149,10 +190,10 @@ public class LoginController {
 
         } catch (Exception e) {
             e.printStackTrace();
-            return ResponseEntity.status(500).body("Selenium error: " + e.getMessage());
-        } finally {
-            driver.quit();
-        }
+            return ResponseEntity.status(500).body("Selenium error: " + e.getMessage());}
+//        } finally {
+//            driver.quit();
+//        }
     }
 
     private String solveCaptcha(WebElement captchaImg) throws Exception {
