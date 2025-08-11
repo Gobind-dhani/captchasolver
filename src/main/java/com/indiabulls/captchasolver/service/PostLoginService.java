@@ -41,24 +41,38 @@ public class PostLoginService {
         collateralInfoLink.click();
         System.out.println("Clicked COLLATERAL ALLOCATION INFORMATION link.");
 
-        // 1️⃣ First download for default tab
+        //  First download for default tab
         downloadCsvForCurrentTab(driver, wait);
 
-        // 2️⃣ Click FO and download
-        WebElement foTab = wait.until(ExpectedConditions
-                .elementToBeClickable(By.xpath("//li[contains(normalize-space(.),'FO')]")));
-        foTab.click();
+        JavascriptExecutor js = (JavascriptExecutor) driver;
+
+// Click FO tab using improved JS event dispatching
+        js.executeScript(
+                "var fo = Array.from(document.querySelectorAll('#navbarNavDropdown ul li')).find(el => el.textContent.trim() === 'FO');" +
+                        "if (fo) {" +
+                        "  fo.scrollIntoView({block:'center', behavior:'smooth'});" +
+                        "  ['mouseover', 'mousedown', 'mouseup', 'click'].forEach(evt => fo.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window })));" +
+                        "} else {" +
+                        "  throw 'FO tab not found';" +
+                        "}"
+        );
         System.out.println("Clicked FO tab.");
         downloadCsvForCurrentTab(driver, wait);
 
-        // 3️⃣ Click CD and download
-        WebElement cdTab = wait.until(ExpectedConditions
-                .elementToBeClickable(By.xpath("//li[contains(normalize-space(.),'CD')]")));
-        cdTab.click();
+// Click CD tab using improved JS event dispatching
+        js.executeScript(
+                "var cd = Array.from(document.querySelectorAll('#navbarNavDropdown ul li')).find(el => el.textContent.trim() === 'CD');" +
+                        "if (cd) {" +
+                        "  cd.scrollIntoView({block:'center', behavior:'smooth'});" +
+                        "  ['mouseover', 'mousedown', 'mouseup', 'click'].forEach(evt => cd.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window })));" +
+                        "} else {" +
+                        "  throw 'CD tab not found';" +
+                        "}"
+        );
         System.out.println("Clicked CD tab.");
         downloadCsvForCurrentTab(driver, wait);
-    }
 
+    }
     private void downloadCsvForCurrentTab(WebDriver driver, WebDriverWait wait) {
         try {
             // Wait for page load
@@ -66,31 +80,28 @@ public class PostLoginService {
                     .executeScript("return document.readyState").equals("complete"));
             System.out.println("Collateral Allocation Information page loaded.");
 
-            // Find the "Client Level Details @" span
+            // Find "Client Level Details @" span
             WebElement clientDetailsTitle = wait.until(ExpectedConditions
                     .presenceOfElementLocated(By.xpath("//span[contains(@class,'page-title') and contains(normalize-space(.),'Client Level Details @')]")));
 
-            // Now find the tmcode dropdown below that span
+            // Find tmcode dropdown below the title
             WebElement targetTmCodeDropdown = clientDetailsTitle.findElement(
-                    By.xpath(".//following::select[@id='tmcode'][1]")  // first tmcode select after the title
+                    By.xpath(".//following::select[@id='tmcode'][1]")
             );
 
-            // Ensure it's clickable
+            // Scroll & ensure clickable
             ((JavascriptExecutor) driver).executeScript("arguments[0].scrollIntoView({block: 'center'});", targetTmCodeDropdown);
             wait.until(ExpectedConditions.elementToBeClickable(targetTmCodeDropdown));
 
-            // Try using Select
+            // Try Select, fallback to JS
             boolean selected = false;
             try {
-                Select select = new Select(targetTmCodeDropdown);
-                select.selectByValue("ALL");
+                new Select(targetTmCodeDropdown).selectByValue("ALL");
                 selected = true;
                 System.out.println("Selected ALL using Selenium Select.");
             } catch (Exception ex) {
-                System.out.println("Selenium Select failed, trying JS fallback: " + ex.getMessage());
+                System.out.println("Select failed, using JS: " + ex.getMessage());
             }
-
-            // JS fallback
             if (!selected) {
                 String js =
                         "arguments[0].value = arguments[1];" +
@@ -98,12 +109,10 @@ public class PostLoginService {
                                 "arguments[0].dispatchEvent(new Event('change', { bubbles: true }));" +
                                 "if (typeof jQuery !== 'undefined') { jQuery(arguments[0]).trigger('change'); }";
                 ((JavascriptExecutor) driver).executeScript(js, targetTmCodeDropdown, "ALL");
-                System.out.println("Selected ALL using JS + events.");
+                System.out.println("Selected ALL via JS events.");
             }
 
-            Thread.sleep(500); // short wait for selection to apply
-
-            // Find and click Show button in current context
+            // Click Show button
             WebElement showButton = wait.until(ExpectedConditions.elementToBeClickable(
                     By.xpath("//button[contains(normalize-space(.),'Show')]")
             ));
@@ -111,15 +120,31 @@ public class PostLoginService {
             showButton.click();
             System.out.println("Clicked Show button.");
 
-            Thread.sleep(700); // small wait for table refresh
+            int maxWaitSeconds = 60; // Retry up to 1 minute
+            JavascriptExecutor js = (JavascriptExecutor) driver;
+            boolean clicked = false;
 
-            // Click CSV icon
-            WebElement csvIcon = wait.until(ExpectedConditions.elementToBeClickable(By.xpath("//img[@alt='CSV']")));
-            ((JavascriptExecutor) driver).executeScript("arguments[0].scrollIntoView(true);", csvIcon);
-            csvIcon.click();
-            System.out.println("Clicked CSV download icon.");
+            for (int i = 0; i < maxWaitSeconds; i++) {
+                try {
+                    Boolean exists = (Boolean) js.executeScript("return document.querySelector('img[alt=\"CSV\"]') !== null;");
+                    if (exists) {
+                        js.executeScript("document.querySelector('img[alt=\"CSV\"]').scrollIntoView({block:'center'});");
+                        js.executeScript("document.querySelector('img[alt=\"CSV\"]').click();");
+                        System.out.println(" Clicked CSV download link via JS.");
+                        clicked = true;
+                        break;
+                    }
+                } catch (Exception e) {
+                    // Ignore and retry
+                }
+                Thread.sleep(1000);
+            }
 
-            Thread.sleep(1000); // wait for download to trigger
+            if (!clicked) {
+                throw new TimeoutException(" CSV download link not found or clickable after " + maxWaitSeconds + " seconds.");
+            }
+
+
 
         } catch (Exception e) {
             e.printStackTrace();
