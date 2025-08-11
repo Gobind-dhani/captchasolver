@@ -1,5 +1,6 @@
 package com.indiabulls.captchasolver.controller;
 
+import com.indiabulls.captchasolver.config.WebDriverManager;
 import net.sourceforge.tess4j.ITesseract;
 import net.sourceforge.tess4j.Tesseract;
 import org.openqa.selenium.*;
@@ -17,9 +18,8 @@ import jakarta.mail.internet.InternetAddress;
 import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Properties;
@@ -32,19 +32,35 @@ public class LoginController {
 
     private static final String LOGIN_URL = "https://www.connect2nsccl.com/auth/#/login";
 
+    // Initialize Tesseract once for all captcha attempts
+    private static final ITesseract TESSERACT = createTesseract();
+
+    private static ITesseract createTesseract() {
+        Tesseract tesseract = new Tesseract();
+        tesseract.setDatapath("C:\\Users\\gobind.barick\\AppData\\Local\\Programs\\Tesseract-OCR\\tessdata");
+        tesseract.setLanguage("eng");
+        tesseract.setPageSegMode(7);
+        tesseract.setTessVariable("tessedit_char_whitelist", "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789");
+        return tesseract;
+    }
+    private final WebDriverManager webDriverManager;
+
+    public LoginController(WebDriverManager webDriverManager) {
+        this.webDriverManager = webDriverManager;
+    }
+
+
     @GetMapping("/test")
     public ResponseEntity<String> testSeleniumLoginInputs() {
-        WebDriver driver = new ChromeDriver();
-
+        WebDriver driver = webDriverManager.getDriver();
         try {
             driver.get(LOGIN_URL);
             WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(15));
 
             wait.until(webDriver -> ((JavascriptExecutor) webDriver)
                     .executeScript("return document.readyState").equals("complete"));
-            Thread.sleep(2000); // Wait for Angular to render
+            Thread.sleep(2000);
 
-            // Initial fill
             WebElement username = wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("username")));
             username.clear();
             username.sendKeys("gobind");
@@ -62,70 +78,46 @@ public class LoginController {
             int retryCount = 0;
             int maxRetries = 100;
 
-            // Phase 1: Login with captcha retries
             while (!otpScreenReached && retryCount < maxRetries) {
                 retryCount++;
                 System.out.println("Attempt " + retryCount + " to solve captcha...");
 
                 // Refill fields if cleared
-                WebElement uField = wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("username")));
-                if (uField.getAttribute("value").isEmpty()) {
-                    uField.clear();
-                    uField.sendKeys("gobind");
-                }
-
-                WebElement pField = wait.until(ExpectedConditions.presenceOfElementLocated(By.id("password")));
-                if (pField.getAttribute("value").isEmpty()) {
-                    pField.clear();
-                    pField.sendKeys("Dhani@123456");
-                }
-
-                WebElement mField = wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("consCode")));
-                if (mField.getAttribute("value").isEmpty()) {
-                    mField.clear();
-                    mField.sendKeys("08756");
-                }
+                if (username.getAttribute("value").isEmpty()) username.sendKeys("gobind");
+                if (passwordField.getAttribute("value").isEmpty()) passwordField.sendKeys("Dhani@123456");
+                if (memberCode.getAttribute("value").isEmpty()) memberCode.sendKeys("08756");
 
                 // Solve captcha
                 WebElement captchaImg = wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("captchaImg")));
-                String ocrResult = solveCaptcha(captchaImg);
-                finalCaptcha = ocrResult;
+                finalCaptcha = solveCaptcha(captchaImg);
 
-                // Fill captcha
                 WebElement captchaField = wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("captcha")));
                 captchaField.clear();
-                captchaField.sendKeys(ocrResult);
+                captchaField.sendKeys(finalCaptcha);
 
-                // Click login
                 WebElement loginButton = wait.until(ExpectedConditions.elementToBeClickable(By.id("btnLogin")));
                 loginButton.click();
 
-                // Handle OTP popup if appears
                 try {
                     WebElement okButton = wait.until(ExpectedConditions.elementToBeClickable(
                             By.cssSelector("button.btn.red-button")
                     ));
                     okButton.click();
-                    System.out.println("OTP popup dismissed.");
-                } catch (TimeoutException te) {
-                    System.out.println("No OTP popup appeared, continuing...");
-                }
+                } catch (TimeoutException ignored) {}
 
                 try {
-                    // Wait for OTP fields - success condition
                     wait.until(ExpectedConditions.numberOfElementsToBeMoreThan(By.cssSelector("input.otp_input"), 5));
-                    otpScreenReached = true; // ✅ mark success and exit loop
+                    otpScreenReached = true;
                 } catch (TimeoutException e) {
                     System.out.println("Captcha likely incorrect. Refreshing captcha...");
                     try {
-                        WebElement refreshButton = driver.findElement(By.id("refreshCaptcha"));
-                        refreshButton.click();
+                        driver.findElement(By.id("refreshCaptcha")).click();
                     } catch (NoSuchElementException ex) {
                         driver.navigate().refresh();
                         wait.until(webDriver -> ((JavascriptExecutor) webDriver)
                                 .executeScript("return document.readyState").equals("complete"));
                     }
-                    Thread.sleep(2000);
+                    Thread.sleep(1000);
                 }
             }
 
@@ -133,12 +125,11 @@ public class LoginController {
                 throw new RuntimeException("Failed to login after " + maxRetries + " captcha attempts.");
             }
 
-            // Phase 2: OTP handling
             List<WebElement> otpFields = wait.until(
                     ExpectedConditions.numberOfElementsToBeMoreThan(By.cssSelector("input.otp_input"), 5)
             );
 
-            Thread.sleep(5000);
+            Thread.sleep(2000);
             String otp = fetchLatestOtpFromEmail(
                     "imap.gmail.com",
                     "gobind.barick@indiabulls.com",
@@ -151,7 +142,6 @@ public class LoginController {
             }
 
             System.out.println("Fetched OTP: " + otp);
-
             for (int i = 0; i < 6; i++) {
                 otpFields.get(i).sendKeys(String.valueOf(otp.charAt(i)));
             }
@@ -160,27 +150,9 @@ public class LoginController {
                     By.cssSelector("button.btn.btn-danger.button-submit-otp")
             ));
             proceedButton.click();
-            System.out.println("Clicked Proceed button after OTP entry.");
 
-            // Phase 3: Post-login navigation
-            WebElement collateralLink = wait.until(ExpectedConditions.elementToBeClickable(
-                    By.xpath("//a[.//span[text()='COLLATERAL MANAGEMENT']]")
-            ));
-            collateralLink.click();
-
-            // Switch to new tab
-            for (String handle : driver.getWindowHandles()) {
-                driver.switchTo().window(handle);
-            }
-
-            WebElement allocationDropdown = wait.until(ExpectedConditions
-                    .elementToBeClickable(By.xpath("//a[@id='navbarDropdown' and contains(text(), 'ALLOCATION')]")));
-            allocationDropdown.click();
-
-            WebElement collateralOption = wait.until(ExpectedConditions
-                    .elementToBeClickable(By.xpath("//a[contains(text(), 'COLLATERAL ALLOCATION INFORMATION')]")));
-            collateralOption.click();
-
+            //  Removed the collateral-management navigation
+            // Now just return success so we can reuse the same browser session later
             return ResponseEntity.ok("Login flow completed. Captcha: " + finalCaptcha);
 
         } catch (Exception e) {
@@ -194,23 +166,10 @@ public class LoginController {
         if (captchaSrc == null || !captchaSrc.contains(",")) {
             throw new RuntimeException("Invalid captcha src attribute: " + captchaSrc);
         }
+        byte[] decodedBytes = Base64.getDecoder().decode(captchaSrc.split(",")[1]);
+        BufferedImage processedImage = preprocessImage(ImageIO.read(new ByteArrayInputStream(decodedBytes)));
 
-        String base64Data = captchaSrc.split(",")[1];
-        byte[] decodedBytes = Base64.getDecoder().decode(base64Data);
-
-        BufferedImage originalImage = ImageIO.read(new ByteArrayInputStream(decodedBytes));
-        BufferedImage processedImage = preprocessImage(originalImage);
-
-        Path tempFile = Files.createTempFile("captcha-preprocessed-", ".png");
-        ImageIO.write(processedImage, "png", tempFile.toFile());
-
-        ITesseract tesseract = new Tesseract();
-        tesseract.setDatapath("C:\\Users\\gobind.barick\\AppData\\Local\\Programs\\Tesseract-OCR\\tessdata");
-        tesseract.setLanguage("eng");
-        tesseract.setPageSegMode(7);
-        tesseract.setTessVariable("tessedit_char_whitelist", "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789");
-
-        String ocrResult = tesseract.doOCR(tempFile.toFile())
+        String ocrResult = TESSERACT.doOCR(processedImage)
                 .replaceAll("[^a-zA-Z0-9]", "")
                 .trim();
 
@@ -219,30 +178,24 @@ public class LoginController {
     }
 
     private BufferedImage preprocessImage(BufferedImage image) {
-        int width = image.getWidth();
-        int height = image.getHeight();
-
         int scale = 3;
-        BufferedImage resized = new BufferedImage(width * scale, height * scale, BufferedImage.TYPE_INT_RGB);
-        Graphics2D g2dResize = resized.createGraphics();
-        g2dResize.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-        g2dResize.drawImage(image, 0, 0, width * scale, height * scale, null);
-        g2dResize.dispose();
+        int width = image.getWidth() * scale;
+        int height = image.getHeight() * scale;
 
-        BufferedImage gray = new BufferedImage(resized.getWidth(), resized.getHeight(), BufferedImage.TYPE_BYTE_GRAY);
-        Graphics g = gray.getGraphics();
-        g.drawImage(resized, 0, 0, null);
-        g.dispose();
+        BufferedImage resized = new BufferedImage(width, height, BufferedImage.TYPE_BYTE_GRAY);
+        Graphics2D g2d = resized.createGraphics();
+        g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        g2d.drawImage(image, 0, 0, width, height, null);
+        g2d.dispose();
 
-        for (int x = 0; x < gray.getWidth(); x++) {
-            for (int y = 0; y < gray.getHeight(); y++) {
-                int rgb = gray.getRGB(x, y) & 0xFF;
-                int threshold = 150;
-                gray.setRGB(x, y, rgb < threshold ? Color.BLACK.getRGB() : Color.WHITE.getRGB());
+        int threshold = 150;
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int rgb = resized.getRGB(x, y) & 0xFF;
+                resized.setRGB(x, y, (rgb < threshold ? 0x000000 : 0xFFFFFF));
             }
         }
-
-        return gray;
+        return resized;
     }
 
     private String fetchLatestOtpFromEmail(String host, String user, String password, String senderFilter) throws Exception {
@@ -264,8 +217,7 @@ public class LoginController {
 
             if (fromEmail.contains(senderFilter)) {
                 String content = message.getContent().toString();
-                Pattern otpPattern = Pattern.compile("\\b\\d{6}\\b");
-                Matcher matcher = otpPattern.matcher(content);
+                Matcher matcher = Pattern.compile("\\b\\d{6}\\b").matcher(content);
                 if (matcher.find()) {
                     return matcher.group(0);
                 }
