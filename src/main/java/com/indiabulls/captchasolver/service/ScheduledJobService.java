@@ -21,7 +21,7 @@ public class ScheduledJobService {
         this.postLoginService = postLoginService;
     }
 
-    @Scheduled(fixedRate = 1500000) // every 15 minutes
+    @Scheduled(fixedRate = 600000) // every 15 minutes
     public void runJob() {
         WebDriver driver = null;
         try {

@@ -36,105 +36,124 @@ public class LoginController {
         return tesseract;
     }
 
-    public void performLogin(WebDriver driver) throws Exception {
-        driver.get(LOGIN_URL);
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(10));
+    public void performLogin(WebDriver driver) {
+        int maxOverallRetries = 5; // Total retries for entire login
+        int overallRetryCount = 0;
 
-        wait.until(webDriver -> ((JavascriptExecutor) webDriver)
-                .executeScript("return document.readyState").equals("complete"));
-
-        WebElement username = wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("username")));
-        username.clear();
-        username.sendKeys("gobind");
-
-        WebElement passwordField = wait.until(ExpectedConditions.presenceOfElementLocated(By.id("password")));
-        passwordField.clear();
-        passwordField.sendKeys("Dhani@123456");
-
-        WebElement memberCode = wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("consCode")));
-        memberCode.clear();
-        memberCode.sendKeys("08756");
-
-        String finalCaptcha = null;
-        boolean otpScreenReached = false;
-        int retryCount = 0;
-        int maxRetries = 100;
-
-        while (!otpScreenReached && retryCount < maxRetries) {
-            retryCount++;
-            long attemptStart = System.currentTimeMillis();
-            System.out.println("Attempt " + retryCount + " to solve captcha...");
-
-            if (username.getAttribute("value").isEmpty()) username.sendKeys("gobind");
-            if (passwordField.getAttribute("value").isEmpty()) passwordField.sendKeys("Dhani@123456");
-            if (memberCode.getAttribute("value").isEmpty()) memberCode.sendKeys("08756");
-
-            WebElement captchaImg = wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("captchaImg")));
-            finalCaptcha = solveCaptcha(captchaImg);
-
-            WebElement captchaField = wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("captcha")));
-            captchaField.clear();
-            captchaField.sendKeys(finalCaptcha);
-
-            WebElement loginButton = wait.until(ExpectedConditions.elementToBeClickable(By.id("btnLogin")));
-            loginButton.click();
-
+        while (overallRetryCount < maxOverallRetries) {
             try {
-                WebElement okButton = new WebDriverWait(driver, Duration.ofSeconds(1))
-                        .until(ExpectedConditions.elementToBeClickable(By.cssSelector("button.btn.red-button")));
-                okButton.click();
-            } catch (TimeoutException ignored) {}
+                System.out.println("=== Login attempt " + (overallRetryCount + 1) + " ===");
 
-            try {
-                wait.withTimeout(Duration.ofSeconds(2))
-                        .until(ExpectedConditions.numberOfElementsToBeMoreThan(By.cssSelector("input.otp_input"), 5));
-                otpScreenReached = true;
-            } catch (TimeoutException e) {
-                System.out.println("Captcha likely incorrect. Refreshing captcha...");
-                try {
-                    driver.findElement(By.id("refreshCaptcha")).click();
-                } catch (NoSuchElementException ex) {
-                    driver.navigate().refresh();
-                    wait.until(webDriver -> ((JavascriptExecutor) webDriver)
-                            .executeScript("return document.readyState").equals("complete"));
+                driver.get(LOGIN_URL);
+                WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(15));
+
+                wait.until(webDriver -> ((JavascriptExecutor) webDriver)
+                        .executeScript("return document.readyState").equals("complete"));
+
+                WebElement username = wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("username")));
+                username.clear();
+                username.sendKeys("gobind");
+
+                WebElement passwordField = wait.until(ExpectedConditions.presenceOfElementLocated(By.id("password")));
+                passwordField.clear();
+                passwordField.sendKeys("Dhani@123456");
+
+                WebElement memberCode = wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("consCode")));
+                memberCode.clear();
+                memberCode.sendKeys("08756");
+
+                String finalCaptcha = null;
+                boolean otpScreenReached = false;
+                int captchaRetryCount = 0;
+                int maxCaptchaRetries = 100;
+
+                while (!otpScreenReached && captchaRetryCount < maxCaptchaRetries) {
+                    captchaRetryCount++;
+                    System.out.println("Captcha attempt " + captchaRetryCount);
+
+                    // Refill if needed
+                    if (username.getAttribute("value").isEmpty()) username.sendKeys("gobind");
+                    if (passwordField.getAttribute("value").isEmpty()) passwordField.sendKeys("Dhani@123456");
+                    if (memberCode.getAttribute("value").isEmpty()) memberCode.sendKeys("08756");
+
+                    WebElement captchaImg = wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("captchaImg")));
+                    finalCaptcha = solveCaptcha(captchaImg);
+
+                    WebElement captchaField = wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("captcha")));
+                    captchaField.clear();
+                    captchaField.sendKeys(finalCaptcha);
+
+                    WebElement loginButton = wait.until(ExpectedConditions.elementToBeClickable(By.id("btnLogin")));
+                    loginButton.click();
+
+                    try {
+                        WebElement okButton = wait.until(ExpectedConditions.elementToBeClickable(
+                                By.cssSelector("button.btn.red-button")
+                        ));
+                        okButton.click();
+                    } catch (TimeoutException ignored) {}
+                    try {
+                        wait.withTimeout(Duration.ofSeconds(2))
+                                .until(ExpectedConditions.numberOfElementsToBeMoreThan(By.cssSelector("input.otp_input"), 5));
+                        otpScreenReached = true;
+                    } catch (TimeoutException e) {
+                        System.out.println("Captcha incorrect. Refreshing...");
+                        try {
+                            driver.findElement(By.id("refreshCaptcha")).click();
+                        } catch (NoSuchElementException ex) {
+                            driver.navigate().refresh();
+                            wait.until(webDriver -> ((JavascriptExecutor) webDriver)
+                                    .executeScript("return document.readyState").equals("complete"));
+                        }
+                    }
                 }
+
+                if (!otpScreenReached) {
+                    throw new RuntimeException("Failed to reach OTP screen after " + maxCaptchaRetries + " attempts");
+                }
+
+                // OTP handling
+                var otpFields = wait.until(ExpectedConditions.numberOfElementsToBeMoreThan(By.cssSelector("input.otp_input"), 5));
+                String otp = fetchLatestOtpFromEmail(
+                        "imap.gmail.com",
+                        "gobind.barick@indiabulls.com",
+                        "fkolsfimzanoexce",
+                        "CONNECT2NSCCL@nse.co.in"
+                );
+
+                if (otp == null || otp.length() != 6) {
+                    throw new RuntimeException("Invalid OTP fetched");
+                }
+
+                System.out.println("Fetched OTP: " + otp);
+                for (int i = 0; i < 6; i++) {
+                    otpFields.get(i).sendKeys(String.valueOf(otp.charAt(i)));
+                }
+
+                WebElement proceedButton = wait.until(ExpectedConditions.elementToBeClickable(
+                        By.cssSelector("button.btn.btn-danger.button-submit-otp")
+                ));
+                proceedButton.click();
+
+                System.out.println(" Login and OTP completed. Captcha used: " + finalCaptcha);
+                return; // SUCCESS — exit method
+
+            } catch (Exception e) {
+                overallRetryCount++;
+                System.err.println(" Error in login attempt " + overallRetryCount + ": " + e.getMessage());
+                e.printStackTrace();
+
+                if (overallRetryCount >= maxOverallRetries) {
+                    throw new RuntimeException(" Login failed after " + maxOverallRetries + " retries", e);
+                }
+
+                System.out.println(" Refreshing page and retrying...");
+                driver.navigate().refresh();
+                try {
+                    Thread.sleep(300000); // small delay before retry
+                } catch (InterruptedException ignored) {}
             }
-
-            // Maintain ~2 seconds per attempt
-            long elapsed = System.currentTimeMillis() - attemptStart;
-            if (elapsed < 2000) {
-                Thread.sleep(2000 - elapsed);
-            }
         }
-
-        if (!otpScreenReached) {
-            throw new RuntimeException("Failed to login after " + maxRetries + " captcha attempts.");
-        }
-
-        // Fetch OTP from email and enter it
-        var otpFields = wait.until(ExpectedConditions.numberOfElementsToBeMoreThan(By.cssSelector("input.otp_input"), 5));
-        String otp = fetchLatestOtpFromEmail(
-                "imap.gmail.com",
-                "gobind.barick@indiabulls.com",
-                "fkolsfimzanoexce",
-                "CONNECT2NSCCL@nse.co.in"
-        );
-
-        if (otp == null || otp.length() != 6) {
-            throw new RuntimeException("Failed to fetch or parse valid 6-digit OTP from email.");
-        }
-
-        System.out.println("Fetched OTP: " + otp);
-        for (int i = 0; i < 6; i++) {
-            otpFields.get(i).sendKeys(String.valueOf(otp.charAt(i)));
-        }
-
-        WebElement proceedButton = wait.until(ExpectedConditions.elementToBeClickable(
-                By.cssSelector("button.btn.btn-danger.button-submit-otp")
-        ));
-        proceedButton.click();
-
-        System.out.println("Login and OTP completed. Captcha used: " + finalCaptcha);
     }
 
     private String solveCaptcha(WebElement captchaImg) throws Exception {
