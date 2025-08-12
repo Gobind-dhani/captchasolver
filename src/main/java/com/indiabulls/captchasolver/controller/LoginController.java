@@ -3,11 +3,11 @@ package com.indiabulls.captchasolver.controller;
 import net.sourceforge.tess4j.ITesseract;
 import net.sourceforge.tess4j.Tesseract;
 import org.openqa.selenium.*;
+import org.openqa.selenium.chrome.ChromeDriver;
+import org.openqa.selenium.chrome.ChromeOptions;
 import org.openqa.selenium.support.ui.ExpectedConditions;
 import org.openqa.selenium.support.ui.WebDriverWait;
 import org.springframework.stereotype.Controller;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RestController;
 
 import javax.imageio.ImageIO;
 import jakarta.mail.*;
@@ -32,12 +32,20 @@ public class LoginController {
         tesseract.setDatapath("C:\\Users\\gobind.barick\\AppData\\Local\\Programs\\Tesseract-OCR\\tessdata");
         tesseract.setLanguage("eng");
         tesseract.setPageSegMode(7);
-        tesseract.setTessVariable("tessedit_char_whitelist", "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789");
+        tesseract.setTessVariable("tessedit_char_whitelist",
+                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789");
         return tesseract;
     }
 
+    private WebDriver launchNewDriver() {
+        ChromeOptions options = new ChromeOptions();
+        options.addArguments("--start-maximized");
+        options.addArguments("--disable-blink-features=AutomationControlled");
+        return new ChromeDriver(options);
+    }
+
     public void performLogin(WebDriver driver) {
-        int maxOverallRetries = 5; // Total retries for entire login
+        int maxOverallRetries = 5;
         int overallRetryCount = 0;
 
         while (overallRetryCount < maxOverallRetries) {
@@ -71,7 +79,6 @@ public class LoginController {
                     captchaRetryCount++;
                     System.out.println("Captcha attempt " + captchaRetryCount);
 
-                    // Refill if needed
                     if (username.getAttribute("value").isEmpty()) username.sendKeys("gobind");
                     if (passwordField.getAttribute("value").isEmpty()) passwordField.sendKeys("Dhani@123456");
                     if (memberCode.getAttribute("value").isEmpty()) memberCode.sendKeys("08756");
@@ -91,7 +98,9 @@ public class LoginController {
                                 By.cssSelector("button.btn.red-button")
                         ));
                         okButton.click();
-                    } catch (TimeoutException ignored) {}
+                    } catch (TimeoutException ignored) {
+                    }
+
                     try {
                         wait.withTimeout(Duration.ofSeconds(2))
                                 .until(ExpectedConditions.numberOfElementsToBeMoreThan(By.cssSelector("input.otp_input"), 5));
@@ -112,7 +121,6 @@ public class LoginController {
                     throw new RuntimeException("Failed to reach OTP screen after " + maxCaptchaRetries + " attempts");
                 }
 
-                // OTP handling
                 var otpFields = wait.until(ExpectedConditions.numberOfElementsToBeMoreThan(By.cssSelector("input.otp_input"), 5));
                 String otp = fetchLatestOtpFromEmail(
                         "imap.gmail.com",
@@ -136,7 +144,7 @@ public class LoginController {
                 proceedButton.click();
 
                 System.out.println(" Login and OTP completed. Captcha used: " + finalCaptcha);
-                return; // SUCCESS — exit method
+                return;
 
             } catch (Exception e) {
                 overallRetryCount++;
@@ -147,11 +155,13 @@ public class LoginController {
                     throw new RuntimeException(" Login failed after " + maxOverallRetries + " retries", e);
                 }
 
-                System.out.println(" Refreshing page and retrying...");
-                driver.navigate().refresh();
+                System.out.println(" Relaunching driver and retrying...");
                 try {
-                    Thread.sleep(300000); // small delay before retry
-                } catch (InterruptedException ignored) {}
+                    driver.quit();
+                    Thread.sleep(120000);
+                } catch (Exception ignored) {
+                }
+                driver = launchNewDriver();
             }
         }
     }
@@ -173,8 +183,7 @@ public class LoginController {
     }
 
     private BufferedImage preprocessImage(BufferedImage image) {
-        // Keep scaling minimal to improve speed
-        int scale = 1; // previously 2
+        int scale = 1;
         int width = image.getWidth() * scale;
         int height = image.getHeight() * scale;
 

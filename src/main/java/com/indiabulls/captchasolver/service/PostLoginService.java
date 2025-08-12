@@ -18,6 +18,8 @@ import java.time.Duration;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
 
 @Service
@@ -44,9 +46,14 @@ public class PostLoginService {
     public void navigateToCollateralManagement(WebDriver driver) {
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(15));
 
-        ((JavascriptExecutor) driver).executeScript(
-                "window.open('https://www.connect2nsccl.com/collateral-management/#/allocation/file-upload', '_blank');"
-        );
+        // Wait for the link to be present in DOM
+        WebElement link = wait.until(ExpectedConditions.presenceOfElementLocated(
+                By.cssSelector("a[href*='collateral-management']")
+        ));
+
+// Click using JavaScript (to avoid target=_blank issues)
+        ((JavascriptExecutor) driver)
+                .executeScript("arguments[0].click();", link);
 
         List<String> tabs = new ArrayList<>(driver.getWindowHandles());
         driver.switchTo().window(tabs.get(tabs.size() - 1));
@@ -164,13 +171,21 @@ public class PostLoginService {
 
     private String waitForDownloadedFile(String segmentName) throws InterruptedException {
         Path downloadPath = Paths.get(downloadDir);
-        String expectedPrefix = segmentName; // You can refine matching if needed
+        String expectedPrefix = segmentName + "_ClientLevelCollaterals_"; // safer pattern
 
-        for (int i = 0; i < 60; i++) { // Wait up to 60 sec
+        for (int i = 0; i < 60; i++) { // wait up to 60 sec
             try {
-                File[] files = downloadPath.toFile().listFiles((dir, name) -> name.startsWith(expectedPrefix) && name.endsWith(".csv"));
+                File[] files = downloadPath.toFile().listFiles((dir, name) ->
+                        name.startsWith(expectedPrefix) && name.endsWith(".csv")
+                );
                 if (files != null && files.length > 0) {
-                    return files[0].getAbsolutePath();
+                    // pick most recent file based on lastModified()
+                    File latestFile = Arrays.stream(files)
+                            .max(Comparator.comparingLong(File::lastModified))
+                            .orElse(null);
+                    if (latestFile != null) {
+                        return latestFile.getAbsolutePath();
+                    }
                 }
             } catch (Exception ignored) {}
             Thread.sleep(1000);
@@ -182,7 +197,7 @@ public class PostLoginService {
         FTPClient ftpClient = new FTPClient();
         try (FileInputStream fis = new FileInputStream(localFilePath)) {
             String currentDateFolder = LocalDate.now().format(DateTimeFormatter.ofPattern("dd-MMM-yyyy"));
-            String remoteDir = ftpBaseDir + "/" + currentDateFolder + "/" + segmentName;
+            String remoteDir = ftpBaseDir + "/" + currentDateFolder + "/collateral shortage"; // fixed folder name
 
             ftpClient.connect(ftpHost, ftpPort);
             ftpClient.login(ftpUsername, ftpPassword);
@@ -191,14 +206,7 @@ public class PostLoginService {
 
             String fileName = Paths.get(localFilePath).getFileName().toString();
 
-            // Check if file exists
-            FTPFile[] existingFiles = ftpClient.listFiles(remoteDir + "/" + fileName);
-            if (existingFiles != null && existingFiles.length > 0) {
-                System.out.println("File already exists on FTP. Skipping upload: " + fileName);
-                return;
-            }
-
-            // Ensure remote directory exists
+            // Ensure remote directory exists (nested)
             for (String folder : remoteDir.split("/")) {
                 if (!folder.isEmpty()) {
                     if (!ftpClient.changeWorkingDirectory(folder)) {
@@ -208,7 +216,7 @@ public class PostLoginService {
                 }
             }
 
-            // Upload
+            // Always upload without checking existing files
             boolean uploaded = ftpClient.storeFile(fileName, fis);
             if (!uploaded) throw new IOException("FTP upload failed: " + fileName);
 
@@ -224,4 +232,5 @@ public class PostLoginService {
             } catch (IOException ignored) {}
         }
     }
+
 }
