@@ -1,26 +1,27 @@
 package com.indiabulls.captchasolver.service;
 
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import org.apache.commons.net.ftp.FTP;
 import org.apache.commons.net.ftp.FTPClient;
-import org.apache.commons.net.ftp.FTPFile;
-import org.openqa.selenium.*;
-import org.openqa.selenium.support.ui.ExpectedConditions;
-import org.openqa.selenium.support.ui.Select;
-import org.openqa.selenium.support.ui.WebDriverWait;
+import org.openqa.selenium.Cookie;
+import org.openqa.selenium.WebDriver;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
-import java.time.Duration;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Comparator;
-import java.util.List;
+import java.util.Base64;
+import java.util.Map;
+import java.util.Set;
 
 @Service
 public class PostLoginService {
@@ -41,194 +42,150 @@ public class PostLoginService {
     private String ftpBaseDir;
 
     @Value("${csv.download.dir}")
-    private String downloadDir; // Path where Selenium downloads the CSV locally first
+    private String downloadDir;
 
-    public boolean goToLandingPageAndCheckCollateralLink(WebDriver driver) {
+    /**
+     * Map containing API URL and payload for each segment.
+     */
+    private final Map<String, String> segmentUrls = Map.of(
+            "CM", "https://www.connect2nsccl.com/collateral-management/cm-coll-client-dtls",
+            "FO", "https://www.connect2nsccl.com/collateral-management/fo-coll-client-dtls",
+            "CD", "https://www.connect2nsccl.com/collateral-management/cd-coll-client-dtls"
+    );
 
-
-            try {
-                // ⏳ Extra delay before navigating — wait for session handshake
-                Thread.sleep(10000); // 5 seconds (adjust if needed)
-
-                driver.get("https://www.connect2nsccl.com/home/#/landing-page");
-
-                // Increase wait time for slow page load
-                WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(30));
-
-                // Try finding the collateral management link
-                wait.until(ExpectedConditions.presenceOfElementLocated(
-                        By.cssSelector("a[href*='collateral-management']")
-                ));
-
-                return true; // Link found → session is valid
-
-            } catch (TimeoutException e) {
-                System.out.println("⚠️ Collateral Management link not found — session likely expired.");
-                return false; // Link missing → session expired
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt(); // restore interrupt flag
-                throw new RuntimeException("Thread sleep interrupted", e);
-            }
-        }
-
-
-        public void navigateToCollateralManagement(WebDriver driver) {
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(15));
-
-        // Wait for the link to be present in DOM
-        WebElement link = wait.until(ExpectedConditions.presenceOfElementLocated(
-                By.cssSelector("a[href*='collateral-management']")
-        ));
-
-// Click using JavaScript (to avoid target=_blank issues)
-        ((JavascriptExecutor) driver)
-                .executeScript("arguments[0].click();", link);
-
-        List<String> tabs = new ArrayList<>(driver.getWindowHandles());
-        driver.switchTo().window(tabs.get(tabs.size() - 1));
-
-        WebDriverWait fastWait = new WebDriverWait(driver, Duration.ofSeconds(12));
-        fastWait.until(webDriver -> ((JavascriptExecutor) webDriver)
-                .executeScript("return document.readyState").equals("complete"));
-
-        System.out.println("Collateral Management file upload page opened in new tab.");
-
-        // Step 1: Click ALLOCATION dropdown
-        WebElement allocationDropdown = wait.until(ExpectedConditions
-                .elementToBeClickable(By.id("navbarDropdown")));
-        allocationDropdown.click();
-        System.out.println("Clicked ALLOCATION dropdown.");
-
-        // Step 2: Select COLLATERAL ALLOCATION INFORMATION
-        WebElement collateralInfoLink = wait.until(ExpectedConditions
-                .elementToBeClickable(By.xpath("//a[contains(text(), 'COLLATERAL ALLOCATION INFORMATION')]")));
-        collateralInfoLink.click();
-        System.out.println("Clicked COLLATERAL ALLOCATION INFORMATION link.");
-
-        //  First download for default tab
-        downloadCsvForCurrentTab(driver, wait, "CM");
-
-        JavascriptExecutor js = (JavascriptExecutor) driver;
-
-        // Click FO tab
-        js.executeScript(
-                "var fo = Array.from(document.querySelectorAll('#navbarNavDropdown ul li')).find(el => el.textContent.trim() === 'FO');" +
-                        "if (fo) { fo.scrollIntoView({block:'center', behavior:'smooth'}); fo.click(); } else { throw 'FO tab not found'; }"
-        );
-        System.out.println("Clicked FO tab.");
-        downloadCsvForCurrentTab(driver, wait, "FO");
-
-        // Click CD tab
-        js.executeScript(
-                "var cd = Array.from(document.querySelectorAll('#navbarNavDropdown ul li')).find(el => el.textContent.trim() === 'CD');" +
-                        "if (cd) { cd.scrollIntoView({block:'center', behavior:'smooth'}); cd.click(); } else { throw 'CD tab not found'; }"
-        );
-        System.out.println("Clicked CD tab.");
-        downloadCsvForCurrentTab(driver, wait, "CD");
-    }
-
-    private void downloadCsvForCurrentTab(WebDriver driver, WebDriverWait wait, String segmentName) {
-        try {
-            wait.until(webDriver -> ((JavascriptExecutor) webDriver)
-                    .executeScript("return document.readyState").equals("complete"));
-            System.out.println("Collateral Allocation Information page loaded for segment: " + segmentName);
-
-            WebElement clientDetailsTitle = wait.until(ExpectedConditions
-                    .presenceOfElementLocated(By.xpath("//span[contains(@class,'page-title') and contains(normalize-space(.),'Client Level Details @')]")));
-
-            WebElement targetTmCodeDropdown = clientDetailsTitle.findElement(
-                    By.xpath(".//following::select[@id='tmcode'][1]")
-            );
-
-            ((JavascriptExecutor) driver).executeScript("arguments[0].scrollIntoView({block: 'center'});", targetTmCodeDropdown);
-            wait.until(ExpectedConditions.elementToBeClickable(targetTmCodeDropdown));
-
-            boolean selected = false;
-            try {
-                new Select(targetTmCodeDropdown).selectByValue("ALL");
-                selected = true;
-                System.out.println("Selected ALL using Selenium Select.");
-            } catch (Exception ex) {
-                System.out.println("Select failed, using JS: " + ex.getMessage());
-            }
-            Thread.sleep(5000);
-            if (!selected) {
-                String js =
-                        "arguments[0].value = arguments[1];" +
-                                "arguments[0].dispatchEvent(new Event('input', { bubbles: true }));" +
-                                "arguments[0].dispatchEvent(new Event('change', { bubbles: true }));";
-                ((JavascriptExecutor) driver).executeScript(js, targetTmCodeDropdown, "ALL");
-                System.out.println("Selected ALL via JS events.");
-            }
-
-            WebElement showButton = wait.until(ExpectedConditions.elementToBeClickable(
-                    By.xpath("//button[contains(normalize-space(.),'Show')]")
-            ));
-            ((JavascriptExecutor) driver).executeScript("arguments[0].scrollIntoView({block:'center'});", showButton);
-            showButton.click();
-            System.out.println("Clicked Show button.");
-            Thread.sleep(5000);
-
-            // Click CSV icon
-            int maxWaitSeconds = 60;
-            JavascriptExecutor js = (JavascriptExecutor) driver;
-            boolean clicked = false;
-            for (int i = 0; i < maxWaitSeconds; i++) {
-                try {
-                    Boolean exists = (Boolean) js.executeScript("return document.querySelector('img[alt=\"CSV\"]') !== null;");
-                    if (exists) {
-                        js.executeScript("document.querySelector('img[alt=\"CSV\"]').scrollIntoView({block:'center'});");
-                        js.executeScript("document.querySelector('img[alt=\"CSV\"]').click();");
-                        System.out.println("Clicked CSV download link via JS.");
-                        clicked = true;
-                        break;
+    private final Map<String, String> segmentPayloads = Map.of(
+            "CM", """
+                    {
+                      "version": "2.0",
+                      "data": {
+                        "memType": "CM",
+                        "memCode": "08756",
+                        "tmCode": "ALL",
+                        "cliCode": "",
+                        "dataFormat": "JSON:CSV"
+                      }
                     }
-                } catch (Exception ignored) {}
-                Thread.sleep(1000);
-            }
-            if (!clicked) throw new TimeoutException("CSV download link not found.");
-
-            // Wait for file to be downloaded locally
-            String downloadedFilePath = waitForDownloadedFile(segmentName);
-            System.out.println("Downloaded file locally: " + downloadedFilePath);
-
-            // Upload to FTP
-            uploadFileToFTP(downloadedFilePath, segmentName);
-
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
-    private String waitForDownloadedFile(String segmentName) throws InterruptedException {
-        Path downloadPath = Paths.get(downloadDir);
-        String expectedPrefix = segmentName + "_ClientLevelCollaterals_"; // safer pattern
-
-        for (int i = 0; i < 60; i++) { // wait up to 60 sec
-            try {
-                File[] files = downloadPath.toFile().listFiles((dir, name) ->
-                        name.startsWith(expectedPrefix) && name.endsWith(".csv")
-                );
-                if (files != null && files.length > 0) {
-                    // pick most recent file based on lastModified()
-                    File latestFile = Arrays.stream(files)
-                            .max(Comparator.comparingLong(File::lastModified))
-                            .orElse(null);
-                    if (latestFile != null) {
-                        return latestFile.getAbsolutePath();
+                  """,
+            "FO", """
+                    {
+                      "version": "2.0",
+                      "data": {
+                        "memType": "CM",
+                        "memCode": "M50834",
+                        "tmCode": "ALL",
+                        "cliCode": "",
+                        "dataFormat": "JSON:CSV"
+                      }
                     }
-                }
-            } catch (Exception ignored) {}
-            Thread.sleep(1000);
+                  """,
+            "CD", """
+                    {
+                      "version": "2.0",
+                      "data": {
+                        "memType": "CM",
+                        "memCode": "M50834",
+                        "tmCode": "ALL",
+                        "cliCode": "",
+                        "dataFormat": "JSON:CSV"
+                      }
+                    }
+                  """
+    );
+
+    /**
+     * After login, directly fetch CSV files for CM, FO, CD via API calls.
+     */
+    public void fetchAllSegmentCsvs(WebDriver driver) {
+        String[] segments = {"CM", "FO", "CD"};
+        for (String segment : segments) {
+            try {
+                pause();
+                System.out.println("📥 Fetching CSV for segment: " + segment);
+
+                // 1. Fetch Base64 CSV from API
+                String base64Csv = fetchCollateralCsvBase64(driver, segment);
+
+                // 2. Save locally
+                String localFilePath = saveBase64CsvToFile(base64Csv, segment);
+                System.out.println("✅ Saved CSV locally: " + localFilePath);
+
+                // 3. Upload to FTP
+                uploadFileToFTP(localFilePath, segment);
+
+            } catch (Exception e) {
+                System.err.println("❌ Failed for segment " + segment + ": " + e.getMessage());
+                e.printStackTrace();
+            }
         }
-        throw new RuntimeException("CSV file not found in download dir after waiting: " + segmentName);
     }
 
+    /**
+     * Calls the NSCCL collateral API using cookies from the Selenium session.
+     */
+    private String fetchCollateralCsvBase64(WebDriver driver, String segment) throws IOException {
+        String apiUrl = segmentUrls.get(segment);
+        String payload = segmentPayloads.get(segment);
+
+        if (apiUrl == null || payload == null) {
+            throw new IllegalArgumentException("No API details found for segment: " + segment);
+        }
+
+        // Extract cookies from Selenium session
+        Set<Cookie> seleniumCookies = driver.manage().getCookies();
+        StringBuilder cookieHeader = new StringBuilder();
+        for (Cookie cookie : seleniumCookies) {
+            cookieHeader.append(cookie.getName()).append("=")
+                    .append(cookie.getValue()).append("; ");
+        }
+
+        // Make POST request with cookies
+        HttpURLConnection conn = (HttpURLConnection) new URL(apiUrl).openConnection();
+        conn.setRequestMethod("POST");
+        conn.setDoOutput(true);
+        conn.setRequestProperty("Content-Type", "application/json");
+        conn.setRequestProperty("Accept", "application/json");
+        conn.setRequestProperty("Cookie", cookieHeader.toString());
+
+        try (OutputStream os = conn.getOutputStream()) {
+            os.write(payload.getBytes(StandardCharsets.UTF_8));
+        }
+
+        if (conn.getResponseCode() != 200) {
+            throw new IOException("HTTP error: " + conn.getResponseCode());
+        }
+
+        // Read response
+        String response = new String(conn.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+
+        // Extract base64 string from JSON
+        JsonObject json = JsonParser.parseString(response).getAsJsonObject();
+        JsonObject result = json.getAsJsonObject("data").getAsJsonObject("result");
+        if (result == null || !result.has("base64str")) {
+            throw new IOException("No base64str found in API response");
+        }
+        return result.get("base64str").getAsString();
+    }
+
+    /**
+     * Saves Base64-decoded CSV to file with a timestamped name.
+     */
+    private String saveBase64CsvToFile(String base64, String segment) throws IOException {
+        byte[] csvBytes = Base64.getDecoder().decode(base64);
+        String fileName = segment + "_ClientLevelCollaterals_" +
+                LocalDateTime.now().format(DateTimeFormatter.ofPattern("ddMMyyyyHHmmss")) + ".csv";
+        Path filePath = Paths.get(downloadDir, fileName);
+        Files.write(filePath, csvBytes, StandardOpenOption.CREATE);
+        return filePath.toString();
+    }
+
+    /**
+     * Uploads the local file to FTP in the date-based directory.
+     */
     private void uploadFileToFTP(String localFilePath, String segmentName) {
         FTPClient ftpClient = new FTPClient();
         try (FileInputStream fis = new FileInputStream(localFilePath)) {
             String currentDateFolder = LocalDate.now().format(DateTimeFormatter.ofPattern("dd-MMM-yyyy"));
-            String remoteDir = ftpBaseDir + "/" + currentDateFolder + "/collateral shortage"; // fixed folder name
+            String remoteDir = ftpBaseDir + "/" + currentDateFolder + "/collateral shortage";
 
             ftpClient.connect(ftpHost, ftpPort);
             ftpClient.login(ftpUsername, ftpPassword);
@@ -237,7 +194,7 @@ public class PostLoginService {
 
             String fileName = Paths.get(localFilePath).getFileName().toString();
 
-            // Ensure remote directory exists (nested)
+            // Ensure remote directory exists
             for (String folder : remoteDir.split("/")) {
                 if (!folder.isEmpty()) {
                     if (!ftpClient.changeWorkingDirectory(folder)) {
@@ -247,11 +204,10 @@ public class PostLoginService {
                 }
             }
 
-            // Always upload without checking existing files
             boolean uploaded = ftpClient.storeFile(fileName, fis);
             if (!uploaded) throw new IOException("FTP upload failed: " + fileName);
 
-            System.out.println("File uploaded successfully to FTP: " + remoteDir + "/" + fileName);
+            System.out.println("📤 Uploaded to FTP: " + remoteDir + "/" + fileName);
         } catch (Exception e) {
             throw new RuntimeException("FTP upload failed: " + e.getMessage(), e);
         } finally {
@@ -260,8 +216,20 @@ public class PostLoginService {
                     ftpClient.logout();
                     ftpClient.disconnect();
                 }
-            } catch (IOException ignored) {}
+            } catch (IOException ignored) {
+            }
         }
     }
 
+    /**
+     * Simple pause helper.
+     */
+    private void pause() {
+        try {
+            Thread.sleep(5000); // 5 seconds
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Thread sleep interrupted", e);
+        }
+    }
 }
