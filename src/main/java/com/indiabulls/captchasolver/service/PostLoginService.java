@@ -43,7 +43,36 @@ public class PostLoginService {
     @Value("${csv.download.dir}")
     private String downloadDir; // Path where Selenium downloads the CSV locally first
 
-    public void navigateToCollateralManagement(WebDriver driver) {
+    public boolean goToLandingPageAndCheckCollateralLink(WebDriver driver) {
+
+
+            try {
+                // ⏳ Extra delay before navigating — wait for session handshake
+                Thread.sleep(10000); // 5 seconds (adjust if needed)
+
+                driver.get("https://www.connect2nsccl.com/home/#/landing-page");
+
+                // Increase wait time for slow page load
+                WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(30));
+
+                // Try finding the collateral management link
+                wait.until(ExpectedConditions.presenceOfElementLocated(
+                        By.cssSelector("a[href*='collateral-management']")
+                ));
+
+                return true; // Link found → session is valid
+
+            } catch (TimeoutException e) {
+                System.out.println("⚠️ Collateral Management link not found — session likely expired.");
+                return false; // Link missing → session expired
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt(); // restore interrupt flag
+                throw new RuntimeException("Thread sleep interrupted", e);
+            }
+        }
+
+
+        public void navigateToCollateralManagement(WebDriver driver) {
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(15));
 
         // Wait for the link to be present in DOM
@@ -122,6 +151,7 @@ public class PostLoginService {
             } catch (Exception ex) {
                 System.out.println("Select failed, using JS: " + ex.getMessage());
             }
+            Thread.sleep(5000);
             if (!selected) {
                 String js =
                         "arguments[0].value = arguments[1];" +
@@ -137,6 +167,7 @@ public class PostLoginService {
             ((JavascriptExecutor) driver).executeScript("arguments[0].scrollIntoView({block:'center'});", showButton);
             showButton.click();
             System.out.println("Clicked Show button.");
+            Thread.sleep(5000);
 
             // Click CSV icon
             int maxWaitSeconds = 60;

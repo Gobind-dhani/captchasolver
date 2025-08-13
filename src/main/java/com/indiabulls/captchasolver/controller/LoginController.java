@@ -100,6 +100,22 @@ public class LoginController {
                         okButton.click();
                     } catch (TimeoutException ignored) {
                     }
+                    // Handle possible second popup (appears randomly)
+                    try {
+                        WebDriverWait shortWait = new WebDriverWait(driver, Duration.ofSeconds(3));
+                        WebElement extraOkButton = shortWait.until(ExpectedConditions.presenceOfElementLocated(
+                                By.cssSelector("button.btn.red-button")
+                        ));
+
+                        if (extraOkButton.isDisplayed() && extraOkButton.isEnabled()) {
+                            extraOkButton.click();
+                            System.out.println(" Second popup dismissed.");
+                        } else {
+                            System.out.println(" Second popup found but not interactable, skipping...");
+                        }
+                    } catch (TimeoutException | ElementNotInteractableException ignored) {
+                        System.out.println(" No second popup detected, continuing...");
+                    }
 
                     try {
                         wait.withTimeout(Duration.ofSeconds(2))
