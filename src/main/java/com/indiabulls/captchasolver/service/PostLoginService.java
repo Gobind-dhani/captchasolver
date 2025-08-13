@@ -9,13 +9,12 @@ import org.openqa.selenium.WebDriver;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.io.FileInputStream;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.*;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -40,9 +39,6 @@ public class PostLoginService {
 
     @Value("${ftp.base-dir}")
     private String ftpBaseDir;
-
-    @Value("${csv.download.dir}")
-    private String downloadDir;
 
     /**
      * Map containing API URL and payload for each segment.
@@ -92,9 +88,6 @@ public class PostLoginService {
                   """
     );
 
-    /**
-     * After login, directly fetch CSV files for CM, FO, CD via API calls.
-     */
     public void fetchAllSegmentCsvs(WebDriver driver) {
         String[] segments = {"CM", "FO", "CD"};
         for (String segment : segments) {
@@ -105,12 +98,12 @@ public class PostLoginService {
                 // 1. Fetch Base64 CSV from API
                 String base64Csv = fetchCollateralCsvBase64(driver, segment);
 
-                // 2. Save locally
-                String localFilePath = saveBase64CsvToFile(base64Csv, segment);
-                System.out.println("✅ Saved CSV locally: " + localFilePath);
+                // 2. Decode and upload directly to FTP
+                byte[] csvBytes = Base64.getDecoder().decode(base64Csv);
+                String fileName = segment + "_ClientLevelCollaterals_" +
+                        LocalDateTime.now().format(DateTimeFormatter.ofPattern("ddMMyyyyHHmmss")) + ".csv";
 
-                // 3. Upload to FTP
-                uploadFileToFTP(localFilePath, segment);
+                uploadBytesToFTP(csvBytes, fileName);
 
             } catch (Exception e) {
                 System.err.println("❌ Failed for segment " + segment + ": " + e.getMessage());
@@ -119,9 +112,6 @@ public class PostLoginService {
         }
     }
 
-    /**
-     * Calls the NSCCL collateral API using cookies from the Selenium session.
-     */
     private String fetchCollateralCsvBase64(WebDriver driver, String segment) throws IOException {
         String apiUrl = segmentUrls.get(segment);
         String payload = segmentPayloads.get(segment);
@@ -130,7 +120,7 @@ public class PostLoginService {
             throw new IllegalArgumentException("No API details found for segment: " + segment);
         }
 
-        // Extract cookies from Selenium session
+        // Extract cookies from Selenium
         Set<Cookie> seleniumCookies = driver.manage().getCookies();
         StringBuilder cookieHeader = new StringBuilder();
         for (Cookie cookie : seleniumCookies) {
@@ -154,10 +144,8 @@ public class PostLoginService {
             throw new IOException("HTTP error: " + conn.getResponseCode());
         }
 
-        // Read response
         String response = new String(conn.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
 
-        // Extract base64 string from JSON
         JsonObject json = JsonParser.parseString(response).getAsJsonObject();
         JsonObject result = json.getAsJsonObject("data").getAsJsonObject("result");
         if (result == null || !result.has("base64str")) {
@@ -166,24 +154,9 @@ public class PostLoginService {
         return result.get("base64str").getAsString();
     }
 
-    /**
-     * Saves Base64-decoded CSV to file with a timestamped name.
-     */
-    private String saveBase64CsvToFile(String base64, String segment) throws IOException {
-        byte[] csvBytes = Base64.getDecoder().decode(base64);
-        String fileName = segment + "_ClientLevelCollaterals_" +
-                LocalDateTime.now().format(DateTimeFormatter.ofPattern("ddMMyyyyHHmmss")) + ".csv";
-        Path filePath = Paths.get(downloadDir, fileName);
-        Files.write(filePath, csvBytes, StandardOpenOption.CREATE);
-        return filePath.toString();
-    }
-
-    /**
-     * Uploads the local file to FTP in the date-based directory.
-     */
-    private void uploadFileToFTP(String localFilePath, String segmentName) {
+    private void uploadBytesToFTP(byte[] fileBytes, String fileName) {
         FTPClient ftpClient = new FTPClient();
-        try (FileInputStream fis = new FileInputStream(localFilePath)) {
+        try (ByteArrayInputStream bais = new ByteArrayInputStream(fileBytes)) {
             String currentDateFolder = LocalDate.now().format(DateTimeFormatter.ofPattern("dd-MMM-yyyy"));
             String remoteDir = ftpBaseDir + "/" + currentDateFolder + "/collateral shortage";
 
@@ -191,8 +164,6 @@ public class PostLoginService {
             ftpClient.login(ftpUsername, ftpPassword);
             ftpClient.enterLocalPassiveMode();
             ftpClient.setFileType(FTP.BINARY_FILE_TYPE);
-
-            String fileName = Paths.get(localFilePath).getFileName().toString();
 
             // Ensure remote directory exists
             for (String folder : remoteDir.split("/")) {
@@ -204,7 +175,7 @@ public class PostLoginService {
                 }
             }
 
-            boolean uploaded = ftpClient.storeFile(fileName, fis);
+            boolean uploaded = ftpClient.storeFile(fileName, bais);
             if (!uploaded) throw new IOException("FTP upload failed: " + fileName);
 
             System.out.println("📤 Uploaded to FTP: " + remoteDir + "/" + fileName);
@@ -221,12 +192,9 @@ public class PostLoginService {
         }
     }
 
-    /**
-     * Simple pause helper.
-     */
     private void pause() {
         try {
-            Thread.sleep(5000); // 5 seconds
+            Thread.sleep(5000);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new RuntimeException("Thread sleep interrupted", e);
