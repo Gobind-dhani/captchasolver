@@ -6,13 +6,7 @@ import org.springframework.stereotype.Component;
 
 @Component
 public class WebDriverManager {
-
-    private WebDriver driver;
-
-    public WebDriver getDriver() {
-        if (driver == null) {
-            driver = new ChromeDriver(); // initialize once
-        }
-        return driver;
+    public WebDriver createDriver() {
+        return new ChromeDriver();
     }
 }

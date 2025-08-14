@@ -1,7 +1,7 @@
 package com.indiabulls.captchasolver.controller;
 
-import net.sourceforge.tess4j.ITesseract;
 import net.sourceforge.tess4j.Tesseract;
+import net.sourceforge.tess4j.TesseractException;
 import org.openqa.selenium.*;
 import org.openqa.selenium.chrome.ChromeDriver;
 import org.openqa.selenium.chrome.ChromeOptions;
@@ -16,6 +16,7 @@ import jakarta.mail.internet.InternetAddress;
 import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
+import java.io.File;
 import java.time.Duration;
 import java.util.Base64;
 import java.util.Properties;
@@ -37,9 +38,6 @@ public class LoginController {
     @Value("${login.membercode}")
     private String memberCodeProp;
 
-    @Value("${tesseract.datapath}")
-    private String tessDataPath;
-
     @Value("${email.host}")
     private String emailHost;
 
@@ -52,25 +50,9 @@ public class LoginController {
     @Value("${email.sender.filter}")
     private String senderFilter;
 
-    private ITesseract createTesseract() {
-        Tesseract tesseract = new Tesseract();
-        tesseract.setDatapath(tessDataPath);
-        tesseract.setLanguage("eng");
-        tesseract.setPageSegMode(7);
-        tesseract.setTessVariable("tessedit_char_whitelist",
-                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789");
-        return tesseract;
-    }
 
-    private WebDriver launchNewDriver() {
-        ChromeOptions options = new ChromeOptions();
-        options.addArguments("--start-maximized");
-        options.addArguments("--disable-blink-features=AutomationControlled");
-        return new ChromeDriver(options);
-    }
 
     public void performLogin(WebDriver driver) {
-        ITesseract TESSERACT = createTesseract();
         int maxOverallRetries = 5;
         int overallRetryCount = 0;
 
@@ -110,7 +92,7 @@ public class LoginController {
                     if (memberCode.getAttribute("value").isEmpty()) memberCode.sendKeys(memberCodeProp);
 
                     WebElement captchaImg = wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("captchaImg")));
-                    finalCaptcha = solveCaptcha(captchaImg, TESSERACT);
+                    finalCaptcha = solveCaptcha(captchaImg);
 
                     WebElement captchaField = wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("captcha")));
                     captchaField.clear();
@@ -189,21 +171,53 @@ public class LoginController {
                 try {
                     Thread.sleep(120000);
                 } catch (Exception ignored) {}
-                driver = launchNewDriver();
+                driver.navigate().refresh();
             }
         }
     }
 
-    private String solveCaptcha(WebElement captchaImg, ITesseract tesseract) throws Exception {
+    private String solveCaptcha(WebElement captchaImg) throws Exception {
         String captchaSrc = captchaImg.getAttribute("src");
         if (captchaSrc == null || !captchaSrc.contains(",")) {
             throw new RuntimeException("Invalid captcha src attribute: " + captchaSrc);
         }
         byte[] decodedBytes = Base64.getDecoder().decode(captchaSrc.split(",")[1]);
         BufferedImage processedImage = preprocessImage(ImageIO.read(new ByteArrayInputStream(decodedBytes)));
-        String ocrResult = tesseract.doOCR(processedImage)
-                .replaceAll("[^a-zA-Z0-9]", "")
-                .trim();
+
+        // Ensure tessdata is available from resources (works in IDE & JAR)
+        File tempTessDataDir = new File(System.getProperty("java.io.tmpdir"), "tessdata");
+        if (!tempTessDataDir.exists()) {
+            tempTessDataDir.mkdirs();
+        }
+
+        File engFile = new File(tempTessDataDir, "eng.traineddata");
+        if (!engFile.exists()) {
+            try (var in = getClass().getResourceAsStream("/tessdata/eng.traineddata")) {
+                if (in == null) {
+                    throw new RuntimeException("eng.traineddata not found in resources");
+                }
+                java.nio.file.Files.copy(
+                        in,
+                        engFile.toPath(),
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING
+                );
+            }
+        }
+
+        // Configure Tesseract to use temp tessdata
+        Tesseract tesseract = new Tesseract();
+        tesseract.setDatapath(tempTessDataDir.getAbsolutePath()); // now points to tessdata folder directly
+        tesseract.setLanguage("eng");
+
+        String ocrResult;
+        try {
+            ocrResult = tesseract.doOCR(processedImage)
+                    .replaceAll("[^a-zA-Z0-9]", "")
+                    .trim();
+        } catch (TesseractException e) {
+            throw new RuntimeException("Error reading captcha: " + e.getMessage(), e);
+        }
+
         System.out.println("OCR Captcha result: '" + ocrResult + "'");
         return ocrResult;
     }

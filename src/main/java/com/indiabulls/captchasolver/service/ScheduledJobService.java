@@ -22,15 +22,14 @@ public class ScheduledJobService {
         this.postLoginService = postLoginService;
     }
 
-
     @Value("${scheduler.fixedRate}")
     private long schedulerFixedRate;
 
-    @Scheduled(fixedRateString = "${scheduler.fixedRate}") // every 10 minutes
+    @Scheduled(fixedRateString = "${scheduler.fixedRate}")
     public void runJob() {
         WebDriver driver = null;
         try {
-            driver = webDriverManager.getDriver();
+            driver = webDriverManager.createDriver();
 
             System.out.println("🔑 Logging in...");
             loginController.performLogin(driver);
@@ -38,10 +37,22 @@ public class ScheduledJobService {
             System.out.println("📥 Downloading all segment CSVs...");
             postLoginService.fetchAllSegmentCsvs(driver);
 
+            System.out.println("🚪 Logging out...");
+            postLoginService.logout(driver);
+
             System.out.println("✅ Scheduled job completed successfully.");
         } catch (Exception e) {
             e.printStackTrace();
             System.err.println("❌ Scheduled job failed: " + e.getMessage());
+        } finally {
+            if (driver != null) {
+                try {
+                    driver.quit();
+                    System.out.println("🛑 WebDriver session closed.");
+                } catch (Exception quitEx) {
+                    System.err.println("⚠️ Failed to close WebDriver: " + quitEx.getMessage());
+                }
+            }
         }
     }
 }

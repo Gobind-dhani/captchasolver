@@ -19,7 +19,7 @@ public class AfterLoginController {
 
     @GetMapping("/auth/after-login")
     public String runAfterLoginTasks() {
-        WebDriver driver = webDriverManager.getDriver();
+        WebDriver driver = webDriverManager.createDriver();
         return "Navigated to Collateral Management page.";
     }
 }
