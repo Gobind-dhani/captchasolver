@@ -157,8 +157,8 @@ public class PostLoginService {
     private void uploadBytesToFTP(byte[] fileBytes, String fileName) {
         FTPClient ftpClient = new FTPClient();
         try (ByteArrayInputStream bais = new ByteArrayInputStream(fileBytes)) {
-            String currentDateFolder = LocalDate.now().format(DateTimeFormatter.ofPattern("dd-MMM-yyyy"));
-            String remoteDir = ftpBaseDir + "/" + currentDateFolder + "/collateral shortage";
+            String currentDateFolder = LocalDate.now().format(DateTimeFormatter.ofPattern("dd-MMMM-yyyy"));
+            String remoteDir = ftpBaseDir + "/" + currentDateFolder + "/collateral shortage/current";
 
             ftpClient.connect(ftpHost, ftpPort);
             ftpClient.login(ftpUsername, ftpPassword);
