@@ -4,6 +4,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.apache.commons.net.ftp.FTP;
 import org.apache.commons.net.ftp.FTPClient;
+import org.openqa.selenium.By;
 import org.openqa.selenium.Cookie;
 import org.openqa.selenium.WebDriver;
 import org.springframework.beans.factory.annotation.Value;
@@ -109,6 +110,23 @@ public class PostLoginService {
                 System.err.println("❌ Failed for segment " + segment + ": " + e.getMessage());
                 e.printStackTrace();
             }
+
+
+        }
+        try {
+            pause(); // Give the UI a moment after last file
+            System.out.println("🚪 Logging out...");
+
+            // Click the user name text to open the dropdown
+            driver.findElement(By.xpath("//div[contains(@class,'user-name-text') and text()='DHANI STOCKS LIMITED']")).click();
+            pause();
+
+            // Click the logout link
+            driver.findElement(By.xpath("//a[contains(@class,'dropdown-item') and contains(.,'Logout')]")).click();
+
+            System.out.println("✅ Successfully logged out");
+        } catch (Exception e) {
+            System.err.println("⚠️ Logout failed: " + e.getMessage());
         }
     }
 

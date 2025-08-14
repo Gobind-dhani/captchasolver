@@ -101,20 +101,38 @@ public class LoginController {
                     } catch (TimeoutException ignored) {
                     }
                     // Handle possible second popup (appears randomly)
+                    // Handle possible second popup (appears randomly)
                     try {
-                        WebDriverWait shortWait = new WebDriverWait(driver, Duration.ofSeconds(3));
-                        WebElement extraOkButton = shortWait.until(ExpectedConditions.presenceOfElementLocated(
-                                By.cssSelector("button.btn.red-button")
+                        WebDriverWait secondPopupWait = new WebDriverWait(driver, Duration.ofSeconds(6));
+
+                        // Wait until popup backdrop disappears (if any)
+                        try {
+                            secondPopupWait.until(ExpectedConditions.invisibilityOfElementLocated(By.cssSelector(".modal-backdrop")));
+                        } catch (TimeoutException ignored) {
+                        }
+
+                        // Wait for button to be visible and clickable
+                        WebElement secondOkButton = secondPopupWait.until(ExpectedConditions.elementToBeClickable(
+                                By.xpath("//button[contains(@class,'btn') and contains(@class,'red-button') and normalize-space()='Ok']")
                         ));
 
-                        if (extraOkButton.isDisplayed() && extraOkButton.isEnabled()) {
-                            extraOkButton.click();
-                            System.out.println(" Second popup dismissed.");
-                        } else {
-                            System.out.println(" Second popup found but not interactable, skipping...");
+                        // Use JS click to bypass overlay interception
+                        ((JavascriptExecutor) driver).executeScript("arguments[0].click();", secondOkButton);
+                        System.out.println("✅ Second popup dismissed successfully.");
+
+                    } catch (TimeoutException e) {
+                        System.out.println("ℹ️ No second popup detected, continuing...");
+                    } catch (ElementClickInterceptedException e) {
+                        System.out.println("⚠️ Second popup found but click intercepted, retrying with JS...");
+                        try {
+                            WebElement secondOkButton = driver.findElement(
+                                    By.xpath("//button[contains(@class,'btn') and contains(@class,'red-button') and normalize-space()='Ok']")
+                            );
+                            ((JavascriptExecutor) driver).executeScript("arguments[0].click();", secondOkButton);
+                            System.out.println("✅ Second popup dismissed via JS click.");
+                        } catch (Exception ex) {
+                            System.out.println("❌ Failed to dismiss second popup: " + ex.getMessage());
                         }
-                    } catch (TimeoutException | ElementNotInteractableException ignored) {
-                        System.out.println(" No second popup detected, continuing...");
                     }
 
                     try {
@@ -173,7 +191,7 @@ public class LoginController {
 
                 System.out.println(" Relaunching driver and retrying...");
                 try {
-                    driver.quit();
+                    //driver.quit();
                     Thread.sleep(120000);
                 } catch (Exception ignored) {
                 }
