@@ -7,6 +7,7 @@ import org.openqa.selenium.chrome.ChromeDriver;
 import org.openqa.selenium.chrome.ChromeOptions;
 import org.openqa.selenium.support.ui.ExpectedConditions;
 import org.openqa.selenium.support.ui.WebDriverWait;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Controller;
 
 import javax.imageio.ImageIO;
@@ -24,12 +25,36 @@ import java.util.regex.Pattern;
 @Controller
 public class LoginController {
 
-    private static final String LOGIN_URL = "https://www.connect2nsccl.com/auth/#/login";
-    private static final ITesseract TESSERACT = createTesseract();
+    @Value("${login.url}")
+    private String loginUrl;
 
-    private static ITesseract createTesseract() {
+    @Value("${login.username}")
+    private String usernameProp;
+
+    @Value("${login.password}")
+    private String passwordProp;
+
+    @Value("${login.membercode}")
+    private String memberCodeProp;
+
+    @Value("${tesseract.datapath}")
+    private String tessDataPath;
+
+    @Value("${email.host}")
+    private String emailHost;
+
+    @Value("${email.user}")
+    private String emailUser;
+
+    @Value("${email.password}")
+    private String emailPassword;
+
+    @Value("${email.sender.filter}")
+    private String senderFilter;
+
+    private ITesseract createTesseract() {
         Tesseract tesseract = new Tesseract();
-        tesseract.setDatapath("C:\\Users\\gobind.barick\\AppData\\Local\\Programs\\Tesseract-OCR\\tessdata");
+        tesseract.setDatapath(tessDataPath);
         tesseract.setLanguage("eng");
         tesseract.setPageSegMode(7);
         tesseract.setTessVariable("tessedit_char_whitelist",
@@ -45,6 +70,7 @@ public class LoginController {
     }
 
     public void performLogin(WebDriver driver) {
+        ITesseract TESSERACT = createTesseract();
         int maxOverallRetries = 5;
         int overallRetryCount = 0;
 
@@ -52,7 +78,7 @@ public class LoginController {
             try {
                 System.out.println("=== Login attempt " + (overallRetryCount + 1) + " ===");
 
-                driver.get(LOGIN_URL);
+                driver.get(loginUrl);
                 WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(15));
 
                 wait.until(webDriver -> ((JavascriptExecutor) webDriver)
@@ -60,15 +86,15 @@ public class LoginController {
 
                 WebElement username = wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("username")));
                 username.clear();
-                username.sendKeys("gobind");
+                username.sendKeys(usernameProp);
 
                 WebElement passwordField = wait.until(ExpectedConditions.presenceOfElementLocated(By.id("password")));
                 passwordField.clear();
-                passwordField.sendKeys("Dhani@123456");
+                passwordField.sendKeys(passwordProp);
 
                 WebElement memberCode = wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("consCode")));
                 memberCode.clear();
-                memberCode.sendKeys("08756");
+                memberCode.sendKeys(memberCodeProp);
 
                 String finalCaptcha = null;
                 boolean otpScreenReached = false;
@@ -79,12 +105,12 @@ public class LoginController {
                     captchaRetryCount++;
                     System.out.println("Captcha attempt " + captchaRetryCount);
 
-                    if (username.getAttribute("value").isEmpty()) username.sendKeys("gobind");
-                    if (passwordField.getAttribute("value").isEmpty()) passwordField.sendKeys("Dhani@123456");
-                    if (memberCode.getAttribute("value").isEmpty()) memberCode.sendKeys("08756");
+                    if (username.getAttribute("value").isEmpty()) username.sendKeys(usernameProp);
+                    if (passwordField.getAttribute("value").isEmpty()) passwordField.sendKeys(passwordProp);
+                    if (memberCode.getAttribute("value").isEmpty()) memberCode.sendKeys(memberCodeProp);
 
                     WebElement captchaImg = wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("captchaImg")));
-                    finalCaptcha = solveCaptcha(captchaImg);
+                    finalCaptcha = solveCaptcha(captchaImg, TESSERACT);
 
                     WebElement captchaField = wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("captcha")));
                     captchaField.clear();
@@ -98,41 +124,20 @@ public class LoginController {
                                 By.cssSelector("button.btn.red-button")
                         ));
                         okButton.click();
-                    } catch (TimeoutException ignored) {
-                    }
-                    // Handle possible second popup (appears randomly)
-                    // Handle possible second popup (appears randomly)
+                    } catch (TimeoutException ignored) {}
+
                     try {
                         WebDriverWait secondPopupWait = new WebDriverWait(driver, Duration.ofSeconds(6));
-
-                        // Wait until popup backdrop disappears (if any)
                         try {
                             secondPopupWait.until(ExpectedConditions.invisibilityOfElementLocated(By.cssSelector(".modal-backdrop")));
-                        } catch (TimeoutException ignored) {
-                        }
+                        } catch (TimeoutException ignored) {}
 
-                        // Wait for button to be visible and clickable
                         WebElement secondOkButton = secondPopupWait.until(ExpectedConditions.elementToBeClickable(
-                                By.xpath("//button[contains(@class,'btn') and contains(@class,'red-button') and normalize-space()='Ok']")
-                        ));
-
-                        // Use JS click to bypass overlay interception
+                                By.xpath("//button[contains(@class,'btn') and contains(@class,'red-button') and normalize-space()='Ok']")));
                         ((JavascriptExecutor) driver).executeScript("arguments[0].click();", secondOkButton);
                         System.out.println("✅ Second popup dismissed successfully.");
-
                     } catch (TimeoutException e) {
                         System.out.println("ℹ️ No second popup detected, continuing...");
-                    } catch (ElementClickInterceptedException e) {
-                        System.out.println("⚠️ Second popup found but click intercepted, retrying with JS...");
-                        try {
-                            WebElement secondOkButton = driver.findElement(
-                                    By.xpath("//button[contains(@class,'btn') and contains(@class,'red-button') and normalize-space()='Ok']")
-                            );
-                            ((JavascriptExecutor) driver).executeScript("arguments[0].click();", secondOkButton);
-                            System.out.println("✅ Second popup dismissed via JS click.");
-                        } catch (Exception ex) {
-                            System.out.println("❌ Failed to dismiss second popup: " + ex.getMessage());
-                        }
                     }
 
                     try {
@@ -156,12 +161,7 @@ public class LoginController {
                 }
 
                 var otpFields = wait.until(ExpectedConditions.numberOfElementsToBeMoreThan(By.cssSelector("input.otp_input"), 5));
-                String otp = fetchLatestOtpFromEmail(
-                        "imap.gmail.com",
-                        "gobind.barick@indiabulls.com",
-                        "fkolsfimzanoexce",
-                        "CONNECT2NSCCL@nse.co.in"
-                );
+                String otp = fetchLatestOtpFromEmail(emailHost, emailUser, emailPassword, senderFilter);
 
                 if (otp == null || otp.length() != 6) {
                     throw new RuntimeException("Invalid OTP fetched");
@@ -183,55 +183,42 @@ public class LoginController {
             } catch (Exception e) {
                 overallRetryCount++;
                 System.err.println(" Error in login attempt " + overallRetryCount + ": " + e.getMessage());
-                e.printStackTrace();
-
                 if (overallRetryCount >= maxOverallRetries) {
                     throw new RuntimeException(" Login failed after " + maxOverallRetries + " retries", e);
                 }
-
-                System.out.println(" Relaunching driver and retrying...");
                 try {
-                    //driver.quit();
                     Thread.sleep(120000);
-                } catch (Exception ignored) {
-                }
+                } catch (Exception ignored) {}
                 driver = launchNewDriver();
             }
         }
     }
 
-    private String solveCaptcha(WebElement captchaImg) throws Exception {
+    private String solveCaptcha(WebElement captchaImg, ITesseract tesseract) throws Exception {
         String captchaSrc = captchaImg.getAttribute("src");
         if (captchaSrc == null || !captchaSrc.contains(",")) {
             throw new RuntimeException("Invalid captcha src attribute: " + captchaSrc);
         }
         byte[] decodedBytes = Base64.getDecoder().decode(captchaSrc.split(",")[1]);
         BufferedImage processedImage = preprocessImage(ImageIO.read(new ByteArrayInputStream(decodedBytes)));
-
-        String ocrResult = TESSERACT.doOCR(processedImage)
+        String ocrResult = tesseract.doOCR(processedImage)
                 .replaceAll("[^a-zA-Z0-9]", "")
                 .trim();
-
         System.out.println("OCR Captcha result: '" + ocrResult + "'");
         return ocrResult;
     }
 
     private BufferedImage preprocessImage(BufferedImage image) {
-        int scale = 1;
-        int width = image.getWidth() * scale;
-        int height = image.getHeight() * scale;
-
+        int width = image.getWidth();
+        int height = image.getHeight();
         BufferedImage resized = new BufferedImage(width, height, BufferedImage.TYPE_BYTE_GRAY);
         Graphics2D g2d = resized.createGraphics();
-        g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
         g2d.drawImage(image, 0, 0, width, height, null);
         g2d.dispose();
-
         BufferedImage binary = new BufferedImage(width, height, BufferedImage.TYPE_BYTE_BINARY);
         Graphics g = binary.getGraphics();
         g.drawImage(resized, 0, 0, null);
         g.dispose();
-
         return binary;
     }
 

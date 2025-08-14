@@ -3,6 +3,7 @@ package com.indiabulls.captchasolver.service;
 import com.indiabulls.captchasolver.controller.LoginController;
 import com.indiabulls.captchasolver.config.WebDriverManager;
 import org.openqa.selenium.WebDriver;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -21,7 +22,11 @@ public class ScheduledJobService {
         this.postLoginService = postLoginService;
     }
 
-    @Scheduled(fixedRate = 600000) // every 10 minutes
+
+    @Value("${scheduler.fixedRate}")
+    private long schedulerFixedRate;
+
+    @Scheduled(fixedRateString = "${scheduler.fixedRate}") // every 10 minutes
     public void runJob() {
         WebDriver driver = null;
         try {
