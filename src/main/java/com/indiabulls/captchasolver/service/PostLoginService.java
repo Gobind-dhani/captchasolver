@@ -7,8 +7,15 @@ import org.apache.commons.net.ftp.FTPClient;
 import org.openqa.selenium.By;
 import org.openqa.selenium.Cookie;
 import org.openqa.selenium.WebDriver;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
+import org.springframework.http.HttpHeaders;
+
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -40,6 +47,11 @@ public class PostLoginService {
 
     @Value("${ftp.base-dir}")
     private String ftpBaseDir;
+
+    @Autowired
+    private RestTemplate restTemplate;
+
+
 
     /**
      * Map containing API URL and payload for each segment.
@@ -91,29 +103,62 @@ public class PostLoginService {
 
     public void fetchAllSegmentCsvs(WebDriver driver) {
         String[] segments = {"CM", "FO", "CD"};
+        int successCount = 0; // Track successful uploads
+
         for (String segment : segments) {
             try {
                 pause();
                 System.out.println("📥 Fetching CSV for segment: " + segment);
 
-                // 1. Fetch Base64 CSV from API
                 String base64Csv = fetchCollateralCsvBase64(driver, segment);
 
-                // 2. Decode and upload directly to FTP
                 byte[] csvBytes = Base64.getDecoder().decode(base64Csv);
                 String fileName = segment + "_ClientLevelCollaterals_" +
                         LocalDateTime.now().format(DateTimeFormatter.ofPattern("ddMMyyyyHHmmss")) + ".csv";
 
                 uploadBytesToFTP(csvBytes, fileName);
 
+                successCount++; // Increment if upload succeeds
+
             } catch (Exception e) {
                 System.err.println("❌ Failed for segment " + segment + ": " + e.getMessage());
                 e.printStackTrace();
             }
+        }
 
-
+        // Call monitor API only if all 3 segments succeeded
+        if (successCount == segments.length) {
+            notifyFilesAdded();
         }
     }
+
+    private void notifyFilesAdded() {
+        try {
+            String monitorUrl = "https://qa-api.dhanistocks.com/monitor/v1/filesAdded/";
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+
+            // Add custom header
+            headers.set("X-API-KEY", "your-secret-key-here");
+
+            // JSON payload with userId
+            String payload = "{ \"userId\": \"Gobind\" }";
+
+            HttpEntity<String> entity = new HttpEntity<>(payload, headers);
+
+            ResponseEntity<String> response = restTemplate.postForEntity(monitorUrl, entity, String.class);
+
+            if (response.getStatusCode().is2xxSuccessful()) {
+                System.out.println(":white_check_mark: Monitor API called successfully via RestTemplate");
+            } else {
+                System.err.println(":x: Monitor API call failed: HTTP " + response.getStatusCodeValue());
+            }
+        } catch (Exception e) {
+            System.err.println(":x: Exception while calling monitor API: " + e.getMessage());
+        }
+    }
+
     public void logout(WebDriver driver) {
         try {
             pause();
